@@ -1,70 +1,75 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Admin Dashboard - Product Management</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-</head>
-<body class="bg-gray-100 font-sans">
+const express = require('express');
+const admin = require('firebase-admin');
+const bodyParser = require('body-parser');
 
-    <div id="login-box" class="fixed inset-0 bg-gray-900 bg-opacity-90 flex items-center justify-center z-50">
-        <div class="bg-white p-8 rounded-xl shadow-2xl w-full max-w-md mx-4">
-            <div class="text-center mb-6">
-                <i class="fa-solid fa-lock text-4xl text-orange-500 mb-2"></i>
-                <h2 class="text-2xl font-bold text-gray-800">Admin Portal</h2>
-                <p class="text-sm text-gray-500">Enter password to manage products</p>
-            </div>
-            <input type="password" id="admin-pass" placeholder="Enter Secure Password" class="w-full p-3 border rounded-lg mb-4 outline-none focus:ring-2 focus:ring-orange-500">
-            <button onclick="checkPassword()" class="w-full bg-orange-500 hover:bg-orange-600 text-white font-bold py-3 rounded-lg transition">Login Dashboard</button>
-        </div>
-    </div>
+const app = express();
+app.use(bodyParser.json());
 
-    <div id="dashboard-content" class="hidden min-h-screen flex flex-col">
-        <header class="bg-white shadow px-6 py-4 flex justify-between items-center">
-            <h1 class="text-xl font-bold text-gray-800 flex items-center gap-2">
-                <i class="fa-solid fa-gauge-high text-orange-500"></i> Jkseller09 Control Panel
-            </h1>
-            <button onclick="location.reload()" class="text-sm text-red-500 hover:underline font-semibold">Logout</button>
-        </header>
+// 1. Firebase Initialize (Aapki credentials yahan aayengi)
+// Note: Apni serviceAccountKey.json file yahan import karni hogi
+const serviceAccount = require("./serviceAccountKey.json");
 
-        <div class="max-w-7xl mx-auto p-4 md:p-6 grid grid-cols-1 lg:grid-cols-3 gap-6 w-full flex-1">
-            <div class="bg-white p-5 rounded-xl shadow-sm border h-fit space-y-4">
-                <h2 class="text-lg font-bold text-gray-700 border-b pb-2"><i class="fa-solid fa-plus-circle text-green-500 mr-1"></i> Add New Product</h2>
-                
-                <div>
-                    <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Product Title</label>
-                    <input type="text" id="p-name" placeholder="e.g., Wireless Bluetooth Earbuds" class="w-full p-2.5 border rounded-lg outline-none focus:ring-2 focus:ring-orange-500" required>
-                </div>
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount)
+});
 
-                <div>
-                    <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Price (Rs.)</label>
-                    <input type="number" id="p-price" placeholder="e.g., 2499" class="w-full p-2.5 border rounded-lg outline-none focus:ring-2 focus:ring-orange-500" required>
-                </div>
+const db = admin.firestore();
 
-                <div>
-                    <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Product Image</label>
-                    <input type="file" id="p-image" accept="image/*" class="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-orange-50 file:text-orange-700 hover:file:bg-orange-100 cursor-pointer" required>
-                </div>
+// Meta Webhook Verification Token (Koi bhi secure word rakh lein)
+const VERIFY_TOKEN = "JH_SELLER_SECRET_TOKEN"; 
 
-                <button id="upload-btn" onclick="uploadProduct()" class="w-full bg-gradient-to-r from-orange-500 to-red-600 text-white font-bold py-3 rounded-lg shadow-md hover:opacity-95 transition tracking-wide flex items-center justify-center gap-2">
-                    <i class="fa-solid fa-cloud-arrow-up"></i> Upload Product
-                </button>
-                <p id="upload-status" class="text-xs text-center font-semibold text-gray-500 mt-2 hidden">Uploading item and saving to database...</p>
-            </div>
+// 2. META WEBHOOK VERIFICATION (GET METHOD)
+app.get('/webhook', (req, res) => {
+    let mode = req.query['hub.mode'];
+    let token = req.query['hub.verify_token'];
+    let challenge = req.query['hub.challenge'];
 
-            <div class="bg-white p-5 rounded-xl shadow-sm border lg:col-span-2 flex flex-col">
-                <h2 class="text-lg font-bold text-gray-700 border-b pb-2 mb-4"><i class="fa-solid fa-boxes-stacked text-orange-500 mr-1"></i> Live Products on Website</h2>
-                <div id="admin-products-list" class="grid grid-cols-1 sm:grid-cols-2 gap-4 overflow-y-auto max-h-[600px] flex-1">
-                    </div>
-            </div>
-        </div>
-    </div>
+    if (mode && token) {
+        if (mode === 'subscribe' && token === VERIFY_TOKEN) {
+            console.log('WEBHOOK_VERIFIED');
+            res.status(200).send(challenge);
+        } else {
+            res.sendStatus(403);
+        }
+    }
+});
 
-    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-storage-compat.js"></script>
-    <script src="admin.js"></script>
-</body>
-</html>
+// 3. INCOMING MESSAGES CATCHER (POST METHOD)
+app.post('/webhook', async (req, res) => {
+    let body = req.body;
+
+    console.log(JSON.stringify(body, null, 2));
+
+    if (body.object) {
+        if (body.entry && 
+            body.entry[0].changes && 
+            body.entry[0].changes[0].value.messages && 
+            body.entry[0].changes[0].value.messages[0]
+        ) {
+            let messageData = body.entry[0].changes[0].value.messages[0];
+            let customerPhone = messageData.from; // Customer ka number
+            let messageText = messageData.text ? messageData.text.body : "Media/Other Message"; // Message text
+            let timestamp = messageData.timestamp;
+
+            try {
+                // Firebase Firestore mein data save ho raha hai
+                await db.collection('whatsapp_chats').add({
+                    phone: customerPhone,
+                    message: messageText,
+                    timestamp: admin.firestore.FieldValue.serverTimestamp(),
+                    status: 'received'
+                });
+                console.log(`Message saved in Firebase from: ${customerPhone}`);
+            } catch (error) {
+                console.error("Firebase Error: ", error);
+            }
+        }
+        res.sendStatus(200);
+    } else {
+        res.sendStatus(404);
+    }
+});
+
+// Port configuration
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
